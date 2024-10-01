@@ -1,75 +1,67 @@
 import User from "../models/user.models.js";
 import bcrypt from "bcryptjs";
 import { generateTokenAndSetCookies } from "../utils/generateToken.js";
+import { oauth2client } from "../utils/googleLogin.js";
+import fetch from "node-fetch";
 
-async function Sighup(req, res) {
-  console.log("hello");
-  try {
-    const { name, email, password } = req.body;
-    const existingEmail = await User.findOne({ email });
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      return res.status(400).json({ error: "Invalid email format" });
-    }
-    if (existingEmail) {
-      return res.status(400).json({ error: "Email already registered" });
-    }
-    if (password.length < 6) {
-      return res
-        .status(400)
-        .json({ error: "Password must be greater than 6 character" });
-    }
-    // HASH PASSWORD //
-    const salt = await bcrypt.genSalt(10);
-    const hashPassword = await bcrypt.hash(password, salt);
-    const newUser = new User({
-      name,
-      email,
-      password: hashPassword,
-    });
 
-    if (newUser) {
-      generateTokenAndSetCookies(newUser._id, res);
-      await newUser.save();
-      res.status(201).json({
-        name: newUser.name,
-        email: newUser.email,
-        password: newUser.password,
-      });
-    } else {
-      res.status(400).json({ error: "Invalid user data" });
-    }
-  } catch (error) {
-    console.log(error);
-    res.status(500).json({ error: "Internal server error" });
-  }
+
+function Logout(req, res) {
+  res.clearCookie('token'); // Assumes the token is stored in cookies
+  res.status(200).json({ message: "Logout successful" });
 }
 
-async function Login(req,res) {
+async function GoogleAuth(req, res) {
   try {
-    const { userName, password } = req.body;
-    const findUser = await User.findOne({ userName });
-    const isPasswordCorrect = await bcrypt.compare(
-      password,
-      findUser?.password || ""
+    const { code } = req.query;
+    console.log("Authorization code:", code);
+
+    // Exchange the authorization code for an access token
+    const { tokens } = await oauth2client.getToken(code);
+    oauth2client.setCredentials(tokens);
+
+    console.log("Tokens received:", tokens);
+
+    // Fetch the user's profile information from Google
+    const userRes = await fetch(
+      `https://www.googleapis.com/oauth2/v3/userinfo?access_token=${tokens.access_token}`
     );
-    if (!isPasswordCorrect || !findUser) {
-      return res.status(400).json({ message: "Invalid credentials" });
+
+    if (!userRes.ok) {
+      throw new Error("Failed to fetch user info from Google");
     }
-    generateTokenAndSetCookies(findUser._id, res);
-    res.status(201).json({
-      _id: findUser._id,
-      name: findUser.name,
-      email: findUser.email,
-    });
+
+    const userInfo = await userRes.json();
+    console.log("Google User Info:", userInfo);
+
+    const { name, email } = userInfo;
+    console.log("User Details:", { name, email });
+
+    // Check if the user already exists in your database
+    let user = await User.findOne({ email });
+
+    if (!user) {
+      // Create a new user if it doesn't exist
+      user = new User({
+        name,
+        email,
+        provider: "google", // Consider adding a provider field
+      });
+      await user.save();
+      
+      // New user created, log them in
+      generateTokenAndSetCookies(user._id, res);
+      return res.status(201).json({...user,success:true});
+    }
+
+    // If user exists, log them in
+    generateTokenAndSetCookies(user._id, res);
+    return res.status(200).json({...user,success:true});
+    
   } catch (error) {
-    console.log(error);
+    console.log("Error during Google authentication:", error);
     return res.status(500).json({ error: "Internal server error" });
   }
 }
 
-function Logout() {
-  console.log("Logout");
-}
-
-export { Sighup, Login, Logout };
+export {  Logout, GoogleAuth };

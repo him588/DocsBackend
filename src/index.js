@@ -4,6 +4,7 @@ import cookieParser from "cookie-parser";
 import DatabaseConnection from "./database/index.js";
 import cors from "cors";
 import authRouter from "./routes/auth.routes.js";
+import documentRouter from "./routes/document.routes.js"
 const app = express();
 
 // CONFIGRATIONS //
@@ -17,7 +18,8 @@ app.use(cookieParser());
 app.use(express.static("public"));
 
 // BUNDELING ROUTES //
-app.use("/api/auth", authRouter);
+app.use("/auth", authRouter);
+app.use("/file",documentRouter)
 
 // SERVER STARTING //
 app.listen(8000, () => {
